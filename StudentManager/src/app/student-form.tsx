@@ -7,11 +7,11 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  Platform,
 } from "react-native";
 
 import { useEffect, useState } from "react";
 import { router, useLocalSearchParams } from "expo-router";
-
 import * as ImagePicker from "expo-image-picker";
 
 import { addStudent, getStudents, updateStudent } from "../services/storage";
@@ -20,32 +20,15 @@ import { Student } from "../types/Student";
 import t from "../../i18n";
 
 export default function StudentForm() {
-  // ==============================
-  // LẤY ID TỪ URL
-  // ==============================
-
-  const { id } = useLocalSearchParams<{
-    id?: string;
-  }>();
+  const { id } = useLocalSearchParams<{ id?: string }>();
 
   const studentIdParam = id ? String(id) : "";
-
-  // Có ID = đang sửa
-  // Không có ID = thêm mới
   const isEdit = studentIdParam !== "";
-
-  // ==============================
-  // STATE
-  // ==============================
 
   const [name, setName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [email, setEmail] = useState("");
   const [avatar, setAvatar] = useState("");
-
-  // ==============================
-  // LOAD SINH VIÊN KHI SỬA
-  // ==============================
 
   useEffect(() => {
     if (isEdit) {
@@ -53,27 +36,37 @@ export default function StudentForm() {
     }
   }, [studentIdParam]);
 
+  // Hiển thị thông báo phù hợp trên web và điện thoại
+  const showMessage = (title: string, message: string) => {
+    if (Platform.OS === "web") {
+      window.alert(`${title}\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  // Quay về danh sách sinh viên
+  const goBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  };
+
+  // Đọc thông tin sinh viên khi chỉnh sửa
   const loadStudent = async () => {
     try {
-      console.log("Đang tìm sinh viên có ID:", studentIdParam);
-
       const students = await getStudents();
-
-      console.log("Danh sách sinh viên:", students);
 
       const student = students.find(
         (item) => String(item.id) === studentIdParam,
       );
 
       if (!student) {
-        console.log("Không tìm thấy sinh viên:", studentIdParam);
-
-        Alert.alert("Lỗi", "Không tìm thấy sinh viên");
-
+        showMessage("Lỗi", "Không tìm thấy sinh viên.");
         return;
       }
-
-      console.log("Đã tìm thấy sinh viên:", student);
 
       setName(student.name);
       setStudentId(student.studentId);
@@ -81,23 +74,36 @@ export default function StudentForm() {
       setAvatar(student.avatar || "");
     } catch (error) {
       console.error("Lỗi tải sinh viên:", error);
-
-      Alert.alert("Lỗi", "Không thể tải thông tin sinh viên");
+      showMessage("Lỗi", "Không thể tải thông tin sinh viên.");
     }
   };
 
-  // ==============================
-  // CHỌN ẢNH
-  // ==============================
-
+  // Chọn ảnh đại diện
   const chooseImage = async () => {
     try {
+      if (Platform.OS === "web") {
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ["images"],
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+
+        if (!result.canceled) {
+          setAvatar(result.assets[0].uri);
+        }
+
+        return;
+      }
+
       const permission =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert("Quyền truy cập", "Cần quyền truy cập thư viện ảnh");
-
+        showMessage(
+          "Quyền truy cập",
+          "Vui lòng cho phép truy cập thư viện ảnh.",
+        );
         return;
       }
 
@@ -113,139 +119,112 @@ export default function StudentForm() {
       }
     } catch (error) {
       console.error("Lỗi chọn ảnh:", error);
-
-      Alert.alert("Lỗi", "Không thể chọn ảnh");
+      showMessage("Lỗi", "Không thể chọn ảnh.");
     }
   };
 
-  // ==============================
-  // LƯU
-  // ==============================
-
+  // Xác nhận và thực hiện lưu
   const save = async () => {
-    console.log("====================");
-    console.log("BẮT ĐẦU LƯU");
-    console.log("ID:", studentIdParam);
-    console.log("isEdit:", isEdit);
-    console.log("Tên:", name);
-    console.log("MSSV:", studentId);
-    console.log("Email:", email);
-    console.log("====================");
+    console.log("ĐÃ BẤM NÚT LƯU");
 
-    // Kiểm tra dữ liệu
-    if (!name.trim() || !studentId.trim() || !email.trim()) {
-      Alert.alert(
+    const trimmedName = name.trim();
+    const trimmedStudentId = studentId.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedName || !trimmedStudentId || !trimmedEmail) {
+      showMessage(
         "Thiếu thông tin",
-        "Vui lòng nhập đầy đủ họ tên, mã sinh viên và email",
+        "Vui lòng nhập đầy đủ họ tên, mã sinh viên và email.",
       );
+      return;
+    }
 
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+      showMessage("Email không hợp lệ", "Vui lòng nhập đúng định dạng email.");
       return;
     }
 
     try {
-      // ==============================
-      // TRƯỜNG HỢP SỬA
-      // ==============================
+      const students = await getStudents();
 
-      if (isEdit) {
-        const updatedStudent: Student = {
-          id: studentIdParam,
-          name: name.trim(),
-          studentId: studentId.trim(),
-          email: email.trim(),
-          avatar: avatar,
-        };
+      // Kiểm tra MSSV trùng với sinh viên khác
+      const duplicate = students.some(
+        (item) =>
+          item.studentId.trim().toLowerCase() ===
+            trimmedStudentId.toLowerCase() &&
+          String(item.id) !== studentIdParam,
+      );
 
-        console.log("Sinh viên chuẩn bị cập nhật:", updatedStudent);
-
-        Alert.alert("Xác nhận", "Bạn có muốn lưu thay đổi không?", [
-          {
-            text: "Không",
-            style: "cancel",
-          },
-          {
-            text: "Có",
-            onPress: async () => {
-              try {
-                console.log("Đang gọi updateStudent...");
-
-                await updateStudent(updatedStudent);
-
-                console.log("CẬP NHẬT THÀNH CÔNG");
-
-                Alert.alert("Thành công", "Đã cập nhật thông tin sinh viên", [
-                  {
-                    text: "OK",
-                    onPress: () => {
-                      router.back();
-                    },
-                  },
-                ]);
-              } catch (error) {
-                console.error("LỖI CẬP NHẬT:", error);
-
-                Alert.alert("Lỗi", "Không thể cập nhật sinh viên");
-              }
-            },
-          },
-        ]);
-
+      if (duplicate) {
+        showMessage("MSSV đã tồn tại", "Vui lòng nhập mã sinh viên khác.");
         return;
       }
 
-      // ==============================
-      // TRƯỜNG HỢP THÊM MỚI
-      // ==============================
-
-      const newStudent: Student = {
-        id: Date.now().toString(),
-        name: name.trim(),
-        studentId: studentId.trim(),
-        email: email.trim(),
-        avatar: avatar,
+      const student: Student = {
+        id: isEdit ? studentIdParam : Date.now().toString(),
+        name: trimmedName,
+        studentId: trimmedStudentId,
+        email: trimmedEmail,
+        avatar,
       };
 
-      console.log("Sinh viên mới:", newStudent);
+      // Trên web dùng confirm để xác nhận thao tác chỉnh sửa
+      if (isEdit) {
+        let confirmed = false;
 
-      await addStudent(newStudent);
+        if (Platform.OS === "web") {
+          confirmed = window.confirm(
+            "Bạn có muốn lưu thay đổi thông tin sinh viên không?",
+          );
+        } else {
+          confirmed = await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              "Xác nhận",
+              "Bạn có muốn lưu thay đổi thông tin sinh viên không?",
+              [
+                {
+                  text: "Không",
+                  style: "cancel",
+                  onPress: () => resolve(false),
+                },
+                {
+                  text: "Có",
+                  onPress: () => resolve(true),
+                },
+              ],
+              { cancelable: true, onDismiss: () => resolve(false) },
+            );
+          });
+        }
 
-      console.log("THÊM SINH VIÊN THÀNH CÔNG");
+        if (!confirmed) return;
 
-      Alert.alert("Thành công", "Đã thêm sinh viên", [
-        {
-          text: "OK",
-          onPress: () => {
-            router.back();
-          },
-        },
-      ]);
+        await updateStudent(student);
+        console.log("CẬP NHẬT SINH VIÊN THÀNH CÔNG");
+        showMessage("Thành công", "Đã cập nhật thông tin sinh viên.");
+      } else {
+        await addStudent(student);
+        console.log("THÊM SINH VIÊN THÀNH CÔNG");
+        showMessage("Thành công", "Đã thêm sinh viên.");
+      }
+
+      goBack();
     } catch (error) {
-      console.error("LỖI KHI LƯU:", error);
-
-      Alert.alert("Lỗi", "Không thể lưu sinh viên");
+      console.error("LỖI KHI LƯU SINH VIÊN:", error);
+      showMessage(
+        "Lỗi lưu dữ liệu",
+        "Không thể lưu sinh viên. Vui lòng kiểm tra Console để xem lỗi.",
+      );
     }
   };
 
-  // ==============================
-  // GIAO DIỆN
-  // ==============================
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      {/* TIÊU ĐỀ */}
-
       <Text style={styles.title}>{isEdit ? t.editStudent : t.addStudent}</Text>
-
-      {/* ẢNH ĐẠI DIỆN */}
 
       <TouchableOpacity onPress={chooseImage} style={styles.avatarContainer}>
         {avatar ? (
-          <Image
-            source={{
-              uri: avatar,
-            }}
-            style={styles.avatar}
-          />
+          <Image source={{ uri: avatar }} style={styles.avatar} />
         ) : (
           <View style={styles.placeholder}>
             <Text>{t.chooseImage}</Text>
@@ -253,10 +232,7 @@ export default function StudentForm() {
         )}
       </TouchableOpacity>
 
-      {/* HỌ TÊN */}
-
       <Text style={styles.label}>{t.name}</Text>
-
       <TextInput
         value={name}
         onChangeText={setName}
@@ -264,10 +240,7 @@ export default function StudentForm() {
         style={styles.input}
       />
 
-      {/* MÃ SINH VIÊN */}
-
       <Text style={styles.label}>{t.studentId}</Text>
-
       <TextInput
         value={studentId}
         onChangeText={setStudentId}
@@ -275,10 +248,7 @@ export default function StudentForm() {
         style={styles.input}
       />
 
-      {/* EMAIL */}
-
       <Text style={styles.label}>{t.email}</Text>
-
       <TextInput
         value={email}
         onChangeText={setEmail}
@@ -287,8 +257,6 @@ export default function StudentForm() {
         autoCapitalize="none"
         style={styles.input}
       />
-
-      {/* NÚT LƯU */}
 
       <TouchableOpacity
         style={styles.button}
@@ -301,33 +269,25 @@ export default function StudentForm() {
   );
 }
 
-// ==============================
-// STYLE
-// ==============================
-
 const styles = StyleSheet.create({
   container: {
     padding: 20,
     paddingBottom: 40,
   },
-
   title: {
     fontSize: 25,
     fontWeight: "bold",
     marginBottom: 20,
   },
-
   avatarContainer: {
     alignSelf: "center",
     marginBottom: 20,
   },
-
   avatar: {
     width: 120,
     height: 120,
     borderRadius: 60,
   },
-
   placeholder: {
     width: 120,
     height: 120,
@@ -336,14 +296,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   label: {
     fontSize: 16,
     fontWeight: "bold",
     marginTop: 12,
     marginBottom: 6,
   },
-
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -352,7 +310,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     backgroundColor: "#fff",
   },
-
   button: {
     backgroundColor: "#2563eb",
     padding: 15,
@@ -360,7 +317,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 25,
   },
-
   buttonText: {
     color: "#fff",
     fontSize: 17,
