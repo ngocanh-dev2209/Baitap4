@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from "react-native";
 
 import { useEffect, useState } from "react";
@@ -16,24 +17,42 @@ import { Student } from "../types/Student";
 import t from "../../i18n";
 
 export default function StudentDetail() {
-  const { id } = useLocalSearchParams();
+  const { id } = useLocalSearchParams<{ id?: string | string[] }>();
+  const studentId = Array.isArray(id) ? id[0] : id;
 
   const [student, setStudent] = useState<Student | null>(null);
 
   useEffect(() => {
+    if (!studentId) {
+      setStudent(null);
+      return;
+    }
+
     loadStudent();
-  }, []);
+  }, [studentId]);
 
   const loadStudent = async () => {
     const students = await getStudents();
-
-    const found = students.find((item) => item.id === id);
-
+    const found = students.find((item) => String(item.id) === String(studentId));
     setStudent(found || null);
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!student) return;
+
+    const deleteStudentById = async () => {
+      await deleteStudent(String(student.id));
+      router.back();
+    };
+
+    if (Platform.OS === "web") {
+      const confirmed = window.confirm(t.confirmDelete || "Bạn có chắc chắn muốn xóa sinh viên này không?");
+
+      if (!confirmed) return;
+
+      await deleteStudentById();
+      return;
+    }
 
     Alert.alert(t.confirmDelete, "", [
       {
@@ -43,10 +62,7 @@ export default function StudentDetail() {
       {
         text: t.yes,
         style: "destructive",
-        onPress: async () => {
-          await deleteStudent(student.id);
-          router.back();
-        },
+        onPress: deleteStudentById,
       },
     ]);
   };
